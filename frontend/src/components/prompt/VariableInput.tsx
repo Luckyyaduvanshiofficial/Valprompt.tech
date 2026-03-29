@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { X, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface VariableInputProps {
   variables: string[];
@@ -17,10 +18,23 @@ export const VariableInput: React.FC<VariableInputProps> = React.memo(({
 
   const handleAdd = (e: React.FormEvent | React.KeyboardEvent) => {
     e.preventDefault();
-    const trimmed = inputValue.trim();
-    if (trimmed && !variables.includes(trimmed)) {
-      onChange([...variables, trimmed]);
+    const trimmed = inputValue.trim().toUpperCase();
+    
+    if (!trimmed) return;
+    if (trimmed.length > 50) {
+      toast.error("Variable name cannot exceed 50 characters.");
+      return;
     }
+    if (!/^[A-Z0-9_]+$/.test(trimmed)) {
+      toast.error("Variable name must be alphanumeric and underscores only.");
+      return;
+    }
+    if (variables.includes(trimmed)) {
+      toast.error("Variable already added.");
+      return;
+    }
+
+    onChange([...variables, trimmed]);
     setInputValue("");
   };
 
@@ -60,8 +74,8 @@ export const VariableInput: React.FC<VariableInputProps> = React.memo(({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             disabled={disabled}
-            placeholder="Add variable (e.g. tone)"
-            className="w-full rounded-md bg-[var(--color-ui-card)] border border-[var(--color-ui-border)] focus:bg-[var(--color-ui-card)] px-3 py-2 text-[14px] outline-none transition-all duration-200 focus:border-[var(--color-text-primary)] disabled:opacity-50 text-[var(--color-text-primary)] placeholder:text-[var(--color-text-placeholder)]"
+            placeholder="Add variable (e.g. TONE)"
+            className="w-full rounded-md bg-[var(--color-ui-card)] border border-[var(--color-ui-border)] focus:bg-[var(--color-ui-card)] px-3 py-2 text-[14px] outline-none transition-all duration-200 focus:border-[var(--color-text-primary)] disabled:opacity-50 text-[var(--color-text-primary)] placeholder:text-[var(--color-text-placeholder)] uppercase"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 handleAdd(e);

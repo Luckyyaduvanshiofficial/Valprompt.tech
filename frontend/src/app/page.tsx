@@ -8,11 +8,12 @@ import { useSWRConfig } from "swr";
 import { TaskInput } from "@/components/prompt/TaskInput";
 import { VariableInput } from "@/components/prompt/VariableInput";
 import { GenerateButton } from "@/components/prompt/GenerateButton";
-import { PromptResult } from "@/components/prompt/PromptResult";
+import { PipelineResult } from "@/components/prompt/PipelineResult";
+import { PipelineProgress } from "@/components/prompt/PipelineProgress";
 import { TestPromptModal } from "@/components/prompt/TestPromptModal";
 import { SidebarToggle } from "@/components/layout/SidebarContext";
 import apiClient from "@/lib/api";
-import { GenerateResponse } from "@/types/api";
+import type { PipelineResponse } from "@/types/api";
 
 const PLACEHOLDERS = [
   "Draft a persuasive email to a cold prospect regarding our enterprise security tool...",
@@ -25,7 +26,7 @@ export default function Home() {
   const [task, setTask] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [result, setResult] = useState<GenerateResponse | null>(null);
+  const [result, setResult] = useState<PipelineResponse | null>(null);
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [placeholderText, setPlaceholderText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -40,28 +41,27 @@ export default function Home() {
       
       if (isDeleting) {
         setPlaceholderText(currentFullText.substring(0, placeholderText.length - 1));
-        setTypingSpeed(20); // Fast delete speed
+        setTypingSpeed(20);
       } else {
         setPlaceholderText(currentFullText.substring(0, placeholderText.length + 1));
-        setTypingSpeed(40 + Math.random() * 40); // Natural varied typing speed
+        setTypingSpeed(40 + Math.random() * 40);
       }
 
-      // If finished typing
       if (!isDeleting && placeholderText === currentFullText) {
-        setTypingSpeed(3000); // Pause to read
+        setTypingSpeed(3000);
         setIsDeleting(true);
       } 
-      // If finished deleting
       else if (isDeleting && placeholderText === "") {
         setIsDeleting(false);
         setLoopNum(loopNum + 1);
-        setTypingSpeed(500); // Pause before next word
+        setTypingSpeed(500);
       }
     };
 
     timer = setTimeout(handleType, typingSpeed);
     return () => clearTimeout(timer);
   }, [placeholderText, isDeleting, loopNum, typingSpeed]);
+
   const { mutate } = useSWRConfig();
 
   const handleGenerate = async () => {
@@ -69,27 +69,34 @@ export default function Home() {
       toast.error("Task description is required to generate a prompt.");
       return;
     }
+    if (task.length > 5000) {
+      toast.error("Task description cannot exceed 5000 characters.");
+      return;
+    }
 
     setIsGenerating(true);
     setResult(null);
 
     try {
-      const response = await apiClient.post<GenerateResponse>("generate/", {
+      const response = await apiClient.post<PipelineResponse>("generate/", {
         task,
         variables,
       });
       
       setResult(response.data);
-      toast.success("Prompt successfully engineered.");
+
+      const scoreText = response.data.score >= 8 ? "High quality" : "Good quality";
+      toast.success(`Prompt engineered! ${scoreText} (${response.data.score.toFixed(1)}/10)`);
       mutate("history/");
 
-      // Scroll to output with a slight delay to allow rendering
+      // Scroll to output
       setTimeout(() => {
         document.getElementById("output-area")?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 100);
 
-    } catch (error: any) {
-      toast.error(error.message || "Failed to generate prompt. Please try again.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to generate prompt. Please try again.";
+      toast.error(message);
     } finally {
       setIsGenerating(false);
     }
@@ -167,12 +174,18 @@ export default function Home() {
 
           </div>
 
-          {/* Generated Result Area */}
-          {result && (
+          {/* Pipeline Progress */}
+          {isGenerating && (
+            <div className="mt-8 animate-in fade-in slide-in-from-top-4 duration-300">
+              <PipelineProgress isActive={isGenerating} />
+            </div>
+          )}
+
+          {/* Pipeline Result Area */}
+          {result && !isGenerating && (
             <div id="output-area" className="mt-8 animate-in fade-in slide-in-from-top-4 duration-500">
-              <PromptResult
-                prompt={result.prompt}
-                variables={result.variables}
+              <PipelineResult
+                result={result}
                 onTestClick={() => setIsTestModalOpen(true)}
               />
             </div>
@@ -185,7 +198,7 @@ export default function Home() {
         <TestPromptModal
           isOpen={isTestModalOpen}
           onClose={() => setIsTestModalOpen(false)}
-          prompt={result.prompt}
+          prompt={result.final_prompt}
           variables={result.variables}
         />
       )}

@@ -788,7 +788,7 @@ def generate_prompt(task: str, variables: list[str] | None = None) -> dict:
         prompt += f"\n\nThe variables to use are:\n{variable_string}"
 
     # Call Gemini
-    raw_response = call_gemini(
+    raw_response, prompt_tokens = call_gemini(
         prompt=prompt,
         temperature=0.0,
         max_tokens=8192,
@@ -803,32 +803,34 @@ def generate_prompt(task: str, variables: list[str] | None = None) -> dict:
     # Check for and fix floating variables
     floating_vars = find_free_floating_variables(extracted_prompt)
     if floating_vars:
-        extracted_prompt = fix_floating_variables(extracted_prompt)
+        extracted_prompt, fix_tokens = fix_floating_variables(extracted_prompt)
+        prompt_tokens += fix_tokens
         found_variables = extract_variables(extracted_prompt)
 
     return {
         "prompt": extracted_prompt,
         "variables": found_variables,
         "raw_response": raw_response,
+        "tokens": prompt_tokens,
     }
 
 
-def fix_floating_variables(prompt: str) -> str:
+def fix_floating_variables(prompt: str) -> tuple[str, int]:
     """
     Fix inapt/free-floating variable usages in a prompt template.
 
     Uses the remove_floating_variables_prompt from the Anthropic notebook.
     """
     fix_prompt = REMOVE_FLOATING_VARIABLES_PROMPT.replace("{$PROMPT}", prompt)
-    response = call_gemini(
+    response, tokens = call_gemini(
         prompt=fix_prompt,
         temperature=0.0,
         max_tokens=8192,
     )
     rewritten = extract_between_tags("rewritten_prompt", response)
     if rewritten:
-        return rewritten[0].strip()
-    return prompt  # Return original if extraction fails
+        return (rewritten[0].strip(), tokens)
+    return (prompt, tokens)  # Return original if extraction fails
 
 
 def test_prompt(prompt_template: str, variable_values: dict[str, str]) -> str:
@@ -847,11 +849,12 @@ def test_prompt(prompt_template: str, variable_values: dict[str, str]) -> str:
         # Handle both {$VAR} and {$VAR NAME} patterns
         filled_prompt = filled_prompt.replace(f"{{${var_name}}}", var_value)
 
-    return call_gemini(
+    res_text, _ = call_gemini(
         prompt=filled_prompt,
         temperature=0.7,  # Slightly creative for responses
         max_tokens=4096,
     )
+    return res_text
 
 
 def improve_prompt(
@@ -868,26 +871,29 @@ def improve_prompt(
     Returns:
         Dict with 'prompt' and 'variables' keys.
     """
-    improve_instruction = f"""You are an expert prompt engineer. Your task is to improve the following prompt template to make it more effective, clear, and robust.
+    improve_instruction = f"""You are a master prompt engineer tasked with executing a strict **Evaluation-Driven Refinement Loop**. Your goal is to critically revise the provided prompt template.
 
 <current_prompt>
 {prompt}
 </current_prompt>
 
-{"<feedback>" + feedback + "</feedback>" if feedback else ""}
+<evaluation_feedback>
+{feedback if feedback else "No specific feedback provided. Critically review for ambiguity, poor XML tagging, or edge-case handling issues."}
+</evaluation_feedback>
 
-Please improve this prompt following these best practices:
-1. Add clear step-by-step reasoning instructions where appropriate
-2. Use XML tags to organize content clearly
-3. Provide explicit output formatting requirements
-4. Add chain-of-thought guidance for complex reasoning
-5. Ensure all variables are properly placed within XML tags
-6. Make the instructions unambiguous and specific
+You MUST aggressively and structurally adapt the prompt to resolve the flaws identified in the evaluation feedback. 
 
-Write your improved prompt inside <improved_prompt> tags. Maintain all existing variables ({{$VARIABLE}}) but feel free to restructure the prompt around them.
+Follow these rigorous standards:
+1. First, analyze the feedback in a <scratchpad> block, outlining the exact weak points and your strategy to solve them.
+2. Ensure clear step-by-step reasoning instructions are maintained or added.
+3. Organize all variables prominently using XML wrappers format.
+4. Strengthen the edge cases, tone guardrails, and explicit formatting instructions.
+5. If the feedback notes "missing <Instructions>" or "excessive length", fix it aggressively.
+
+Output your heavily improved final prompt inside <improved_prompt> tags. Do not lose the existing {{$VARIABLE}} hooks.
 """
 
-    response = call_gemini(
+    response, tokens = call_gemini(
         prompt=improve_instruction,
         temperature=0.0,
         max_tokens=8192,
@@ -902,4 +908,5 @@ Write your improved prompt inside <improved_prompt> tags. Maintain all existing 
     return {
         "prompt": improved_prompt,
         "variables": extract_variables(improved_prompt),
+        "tokens": tokens,
     }
